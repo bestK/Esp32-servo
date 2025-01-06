@@ -5,6 +5,7 @@
 #include <EEPROM.h>
 #include <Adafruit_NeoPixel.h>
 #include <ArduinoJson.h>
+#include <PubSubClient.h>
 
 struct Response
 {
@@ -36,6 +37,7 @@ struct DeviceStatus
   String wifiIP;        // 当前连接的WiFiIP
   String wifiPasswd;    // 当前连接的WiFi密码
   int servoSpeed;       // 舵机运行速度 (1-100)
+  String mqttTopic;     // MQTT主题
 };
 
 DeviceStatus deviceStatus; // 全局变量声明
@@ -329,7 +331,7 @@ void setupServer()
       wifi["ssid"] = deviceStatus.wifiSSID;
 
       doc["voltage"] = deviceStatus.voltage;
-
+      doc["mqttTopic"] = deviceStatus.mqttTopic;
       Response response;
       response.success = true;
       response.data = doc;
@@ -409,6 +411,130 @@ const unsigned long SHORT_PRESS_TIME = 1000; // 短按定义为1秒内
 static unsigned long btnPressTime = 0;
 static bool btnPressed = false;
 
+// MQTT Broker 配置
+const char *mqtt_broker = "broker.emqx.io";
+const char *mqtt_topic = "esp32/servo";
+const char *mqtt_username = "emqx";
+const char *mqtt_password = "public";
+const int mqtt_port = 1883;
+
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+
+struct MQTTCommand
+{
+  String command;
+  int position;
+  int restore;
+  String pwd;
+};
+
+// MQTT 回调函数
+void callback(char *topic, byte *payload, unsigned int length)
+{
+  String message;
+  for (int i = 0; i < length; i++)
+  {
+    message += (char)payload[i];
+  }
+  Serial.println("MQTT消息: " + message);
+  MQTTCommand c;
+  JsonDocument doc;
+  deserializeJson(doc, message);
+  c.command = doc["command"].as<String>();
+  c.position = doc["position"].as<int>();
+  c.restore = doc["restore"].as<int>();
+  c.pwd = doc["pwd"].as<String>();
+
+  // 修改密码验证逻辑
+  if (c.command != nullptr && c.command != "" && c.command != "null")
+  {
+    if (c.pwd != String(credentials.password))
+    {
+      Serial.println(c.command);
+      Serial.println("密码错误:" + c.pwd);
+      Serial.println("原始密码:" + String(credentials.password));
+      return;
+    }
+  }
+
+  if (c.command == "start")
+  {
+    deviceStatus.isServoRunning = true;
+  }
+  else if (c.command == "stop")
+  {
+    deviceStatus.isServoRunning = false;
+  }
+  else if (c.command == "position")
+  {
+    deviceStatus.isServoRunning = false;
+    delay(1000);
+    int targetPosition = c.position;
+    targetPosition = constrain(targetPosition, 0, 180);
+    int lastPosition = deviceStatus.servoPosition;
+
+    // 移动到目标位置
+    myservo.write(targetPosition);
+
+    if (c.restore == 1)
+    {
+      // 根据角度差计算所需时间
+      int angleDiff = abs(targetPosition - lastPosition);
+      // 假设舵机速度约为60度/0.1秒，再加上一些余量
+      int moveTime = (angleDiff * 100 / 60) + 500; // 单位：毫秒
+
+      delay(moveTime);
+      myservo.write(lastPosition);
+      Serial.println("舵机位置已恢复");
+      deviceStatus.servoPosition = lastPosition;
+    }
+    else
+    {
+      deviceStatus.servoPosition = targetPosition;
+    }
+    delay(1000);
+  }
+}
+
+// 在 setup() 函数中添加 MQTT 初始化
+void setupMQTT()
+{
+  mqttClient.setServer(mqtt_broker, mqtt_port);
+  mqttClient.setCallback(callback);
+}
+
+// 在 loop() 函数中添加 MQTT 重连检查
+void checkMQTTConnection()
+{
+  if (!mqttClient.connected() && deviceStatus.isWiFiConnected)
+  {
+    while (!mqttClient.connected())
+    {
+      String client_id = "esp32-servo-";
+      client_id += String(WiFi.macAddress());
+
+      if (mqttClient.connect(client_id.c_str(), mqtt_username, mqtt_password))
+      {
+        Serial.println("MQTT broker connected");
+        // 生成随机主题后缀
+        // String random_suffix = String(random(0xffff), HEX);
+        // String topic = String(mqtt_topic) + "/" + random_suffix;
+        // mqttClient.subscribe(topic.c_str());
+        mqttClient.subscribe(mqtt_topic);
+        Serial.println("MQTT topic subscribed: " + String(mqtt_topic));
+        deviceStatus.mqttTopic = String(mqtt_topic);
+      }
+      else
+      {
+        Serial.print("MQTT connection failed, rc=");
+        Serial.println(mqttClient.state());
+        delay(2000);
+      }
+    }
+  }
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -442,6 +568,7 @@ void setup()
 
   setupServer();
   pinMode(RESET_BTN_PIN, INPUT_PULLUP); // 设置Reset按键为输入上拉
+  setupMQTT();
 }
 
 void loop()
@@ -567,5 +694,27 @@ void loop()
       Serial.println("正在重新连接WiFi...");
     }
     btnPressed = false;
+  }
+
+  checkMQTTConnection();
+  if (mqttClient.connected())
+  {
+    mqttClient.loop();
+
+    // 定期发送状态信息到 MQTT
+    static unsigned long lastMsg = 0;
+    if (millis() - lastMsg > 5000)
+    {
+      lastMsg = millis();
+
+      // 创建状态 JSON
+      JsonDocument doc;
+      doc["running"] = deviceStatus.isServoRunning;
+      doc["position"] = deviceStatus.servoPosition;
+
+      String status;
+      serializeJson(doc, status);
+      mqttClient.publish(deviceStatus.mqttTopic.c_str(), status.c_str());
+    }
   }
 }
