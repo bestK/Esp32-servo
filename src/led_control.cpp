@@ -13,6 +13,7 @@ void LEDController::begin()
 
 void LEDController::changeStatus(String status)
 {
+    _currentStatus = status;
     if (status == STATUS_AP)
     {
         blink(0); // 黑色闪烁
@@ -31,11 +32,19 @@ void LEDController::changeStatus(String status)
     }
     else if (status == STATUS_WIFI_CONNECTED)
     {
-        light(LED_BLINK_COLOR_GREEN); // 绿色常亮
+        blink(LED_BLINK_COLOR_GREEN); // 绿色闪烁
     }
     else if (status == STATUS_SERVO_RUNNING)
     {
         blink(LED_BLINK_COLOR_BLUE); // 蓝色闪烁
+    }
+    else if (status == STATUS_MQTT_RECEIVE)
+    {
+        blink(LED_BLINK_COLOR_PURPLE); // 紫色闪烁
+    }
+    else if (status == STATUS_SERVO_STOPPED)
+    {
+        blink(LED_BLINK_COLOR_RED); // 红色闪烁
     }
 }
 
@@ -43,7 +52,7 @@ void LEDController::blink(uint32_t color)
 {
     unsigned long currentTime = millis();
 
-    if (currentTime - lastBlinkTime >= 400)
+    if (currentTime - lastBlinkTime >= 200)
     {
         lastBlinkTime = currentTime;
         blinkState = !blinkState;
@@ -64,4 +73,9 @@ void LEDController::light(uint32_t color)
 {
     pixels.setPixelColor(0, color);
     pixels.show();
+}
+
+void LEDController::update()
+{
+    changeStatus(_currentStatus);
 }

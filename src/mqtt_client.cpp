@@ -1,5 +1,6 @@
 #include "mqtt_client.h"
 #include "servo_control.h"
+#include <led_control.h>
 
 extern DeviceStatus deviceStatus;
 extern WiFiCredentials credentials;
@@ -14,9 +15,84 @@ void MQTTClientManager::begin()
 
 bool MQTTClientManager::setupMQTT()
 {
+    if (!deviceStatus.isWiFiConnected)
+    {
+        Serial.println("WiFi未连接，无法连接MQTT");
+        return false;
+    }
+
+    // 检查WiFi连接状态
+    Serial.print("WiFi状态: ");
+    Serial.println(WiFi.status() == WL_CONNECTED ? "已连接" : "未连接");
+    Serial.print("WiFi IP: ");
+    Serial.println(WiFi.localIP());
+
+    // 设置MQTT服务器
     mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
     mqttClient.setCallback(callback);
-    return true;
+    mqttClient.setKeepAlive(MQTT_KEEPALIVE);
+
+    // 生成唯一的客户端ID
+    String client_id = "esp32-servo-" + String(WiFi.macAddress());
+    Serial.print("MQTT客户端ID: ");
+    Serial.println(client_id);
+
+    // 尝试连接MQTT服务器
+    if (mqttClient.connect(client_id.c_str(), MQTT_USERNAME, MQTT_PASSWORD, nullptr, 0, true, nullptr, 0))
+    {
+        Serial.println("MQTT连接成功");
+
+        // 订阅主题并检查结果
+        if (mqttClient.subscribe(MQTT_TOPIC))
+        {
+            Serial.println("成功订阅主题: " + String(MQTT_TOPIC));
+            deviceStatus.mqttTopic = MQTT_TOPIC;
+        }
+        else
+        {
+            Serial.println("订阅主题失败");
+        }
+        return true;
+    }
+
+    // 输出详细的错误信息
+    int state = mqttClient.state();
+    Serial.print("MQTT连接失败，错误码: ");
+    Serial.print(state);
+    Serial.print(" - ");
+    switch (state)
+    {
+    case -4:
+        Serial.println("MQTT_CONNECTION_TIMEOUT");
+        break;
+    case -3:
+        Serial.println("MQTT_CONNECTION_LOST");
+        break;
+    case -2:
+        Serial.println("MQTT_CONNECT_FAILED");
+        break;
+    case -1:
+        Serial.println("MQTT_DISCONNECTED");
+        break;
+    case 1:
+        Serial.println("MQTT_CONNECT_BAD_PROTOCOL");
+        break;
+    case 2:
+        Serial.println("MQTT_CONNECT_BAD_CLIENT_ID");
+        break;
+    case 3:
+        Serial.println("MQTT_CONNECT_UNAVAILABLE");
+        break;
+    case 4:
+        Serial.println("MQTT_CONNECT_BAD_CREDENTIALS");
+        break;
+    case 5:
+        Serial.println("MQTT_CONNECT_UNAUTHORIZED");
+        break;
+    default:
+        Serial.println("未知错误");
+    }
+    return false;
 }
 
 void MQTTClientManager::callback(char *topic, byte *payload, unsigned int length)
@@ -28,6 +104,7 @@ void MQTTClientManager::callback(char *topic, byte *payload, unsigned int length
     }
 
     Serial.println("收到MQTT消息: " + message);
+
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, message);
 
@@ -58,11 +135,13 @@ void MQTTClientManager::callback(char *topic, byte *payload, unsigned int length
     {
         servoController.setRunning(true);
         deviceStatus.isServoRunning = true;
+        ledController.changeStatus(STATUS_SERVO_RUNNING);
     }
     else if (cmd.command == "stop")
     {
         servoController.setRunning(false);
         deviceStatus.isServoRunning = false;
+        ledController.changeStatus(STATUS_SERVO_STOPPED);
     }
     else if (cmd.command == "position")
     {
@@ -91,23 +170,8 @@ void MQTTClientManager::checkConnection()
 {
     if (deviceStatus.isWiFiConnected && !mqttClient.connected())
     {
-        unsigned long now = millis();
-        if (now - lastReconnectAttempt > RECONNECT_INTERVAL)
-        {
-            lastReconnectAttempt = now;
-            Serial.println("尝试重新连接MQTT...");
-            String client_id = "esp32-servo-" + String(WiFi.macAddress());
-            if (mqttClient.connect(client_id.c_str(), MQTT_USERNAME, MQTT_PASSWORD))
-            {
-                Serial.println("MQTT重新连接成功");
-                mqttClient.subscribe(MQTT_TOPIC);
-                lastReconnectAttempt = 0;
-            }
-            else
-            {
-                Serial.println("MQTT重连失败，将在" + String(RECONNECT_INTERVAL / 1000) + "秒后重试");
-            }
-        }
+        Serial.println("MQTT未连接，尝试重新连接");
+        setupMQTT();
     }
 }
 

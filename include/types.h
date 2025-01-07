@@ -15,6 +15,7 @@ struct DeviceStatus
     bool isServoRunning;
     int servoPosition;
     bool isWiFiConnected;
+    bool isWiFiConnecting;
     float voltage;
     String wifiSSID;
     String wifiIP;

@@ -57,22 +57,10 @@ void loop()
   wifiManager.update();
   servoController.update();
   mqttManager.update();
+  ledController.update();
   webServerManager.handleClient();
 
-  // LED状态更新
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    if (deviceStatus.isServoRunning)
-    {
-      ledController.changeStatus(STATUS_SERVO_RUNNING);
-    }
-    else
-    {
-      ledController.changeStatus(STATUS_WIFI_CONNECTED);
-    }
-  }
-
-  // 按键检测
+   // 按键检测
   int btnState = digitalRead(RESET_PIN);
   if (btnState == LOW && !btnPressed)
   {

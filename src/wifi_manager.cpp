@@ -23,6 +23,11 @@ void WiFiManager::update()
         return; // AP模式下不再尝试重连
     }
 
+    if (deviceStatus.isWiFiConnecting)
+    {
+        return;
+    }
+
     static unsigned long lastCheck = 0;
     unsigned long now = millis();
 
@@ -54,11 +59,10 @@ bool WiFiManager::connect()
     if (strlen(credentials.ssid) == 0 || strlen(credentials.password) == 0)
     {
         Serial.println("没有保存的WiFi凭证");
-        Serial.println("ssid: " + String(credentials.ssid));
-        Serial.println("password: " + String(credentials.password));
         return false;
     }
 
+    // 检查重连次数
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS)
     {
         Serial.println("已达到最大重连次数");
@@ -76,17 +80,22 @@ bool WiFiManager::connect()
     Serial.print("重连次数: ");
     Serial.println(reconnectAttempts + 1);
 
+    deviceStatus.isWiFiConnecting = true;
     ledController.changeStatus(STATUS_WIFI_CONNECTING);
+    WiFi.disconnect(true);
+    delay(1000);
     WiFi.begin(credentials.ssid, credentials.password);
 
     // 等待连接建立
     int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) // 20次尝试，每次500ms
+    while (WiFi.status() != WL_CONNECTED && attempts < 30)
     {
-        delay(500);
+        delay(1000);
         Serial.print(".");
         attempts++;
     }
+
+    Serial.println("");
 
     if (WiFi.status() == WL_CONNECTED)
     {
@@ -102,6 +111,15 @@ bool WiFiManager::connect()
     }
 
     reconnectAttempts++;
+
+    // 如果还有重试机会，则递归调用connect()
+    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS)
+    {
+        Serial.println("连接失败，准备重试...");
+        delay(1000); // 等待1秒后重试
+        return connect();
+    }
+
     return false;
 }
 
