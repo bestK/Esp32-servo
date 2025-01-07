@@ -25,6 +25,10 @@ void LEDController::changeStatus(String status)
     {
         blink(LED_BLINK_COLOR_YELLOW); // 黄色闪烁
     }
+    else if (status == STATUS_WIFI_ERROR)
+    {
+        light(LED_BLINK_COLOR_YELLOW); // 黄色常亮
+    }
     else if (status == STATUS_WIFI_CONNECTED)
     {
         light(LED_BLINK_COLOR_GREEN); // 绿色常亮

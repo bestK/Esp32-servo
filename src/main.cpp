@@ -71,16 +71,6 @@ void loop()
       ledController.changeStatus(STATUS_WIFI_CONNECTED);
     }
   }
-  else
-  {
-    ledController.changeStatus(STATUS_WIFI_DISCONNECTED);
-    // 尝试重新连接WiFi
-    if (millis() - lastWiFiReconnectAttempt > 5000)
-    {
-      lastWiFiReconnectAttempt = millis();
-      wifiManager.connect();
-    }
-  }
 
   // 按键检测
   int btnState = digitalRead(RESET_PIN);

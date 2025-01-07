@@ -1,10 +1,14 @@
 #include "wifi_manager.h"
 #include "led_control.h"
+#include <types.h>
+#include <config.h>
 
 extern DeviceStatus deviceStatus;
 extern WiFiCredentials credentials;
 
 WiFiManager wifiManager;
+
+bool isAPMode = false;
 
 void WiFiManager::begin()
 {
@@ -14,58 +18,96 @@ void WiFiManager::begin()
 
 void WiFiManager::update()
 {
-    static unsigned long lastAttemptTime = 0;
-
-    if (!isConnected())
+    if (isAPMode)
     {
-        // 保持 CONNECTING 状态，让LED持续闪烁
-        ledController.changeStatus(STATUS_WIFI_CONNECTING);
+        return; // AP模式下不再尝试重连
+    }
 
-        if (millis() - lastAttemptTime > WIFI_RETRY_DELAY)
+    static unsigned long lastCheck = 0;
+    unsigned long now = millis();
+
+    if (now - lastCheck > 5000)
+    {
+        lastCheck = now;
+        if (WiFi.status() != WL_CONNECTED)
         {
-            lastAttemptTime = millis();
-            // 检查是否超时
-            if (WiFi.status() == WL_CONNECTED)
+            if (deviceStatus.isWiFiConnected)
             {
-                Serial.println("WiFi连接成功");
-                ledController.changeStatus(STATUS_WIFI_CONNECTED);
+                Serial.println("WiFi断开，尝试重新连接...");
+                deviceStatus.isWiFiConnected = false;
+                ledController.changeStatus(STATUS_WIFI_DISCONNECTED);
             }
+            WiFi.disconnect();
+            connect();
         }
-    }
-
-    // 更新设备状态
-    deviceStatus.isWiFiConnected = isConnected();
-    if (isConnected())
-    {
-        deviceStatus.wifiSSID = getSSID();
-        deviceStatus.wifiIP = getIP();
-    }
-    else
-    {
-        deviceStatus.wifiSSID = "";
-        deviceStatus.wifiIP = "";
+        else if (!deviceStatus.isWiFiConnected)
+        {
+            deviceStatus.isWiFiConnected = true;
+            deviceStatus.wifiIP = WiFi.localIP().toString();
+            ledController.changeStatus(STATUS_WIFI_CONNECTED);
+        }
     }
 }
 
 bool WiFiManager::connect()
 {
-    if (strlen(credentials.ssid) == 0)
+    if (strlen(credentials.ssid) == 0 || strlen(credentials.password) == 0)
     {
         Serial.println("没有保存的WiFi凭证");
+        Serial.println("ssid: " + String(credentials.ssid));
+        Serial.println("password: " + String(credentials.password));
         return false;
+    }
+
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS)
+    {
+        Serial.println("已达到最大重连次数");
+        ledController.changeStatus(STATUS_WIFI_ERROR);
+        Serial.println("尝试启动AP模式");
+        setupAP();
+        return true;
     }
 
     Serial.println("尝试连接WiFi...");
     Serial.print("SSID: ");
     Serial.println(credentials.ssid);
-    ledController.changeStatus(STATUS_WIFI_CONNECTING); // WiFi连接中
+    Serial.print("密码: ");
+    Serial.println(credentials.password);
+    Serial.print("重连次数: ");
+    Serial.println(reconnectAttempts + 1);
+
+    ledController.changeStatus(STATUS_WIFI_CONNECTING);
     WiFi.begin(credentials.ssid, credentials.password);
 
-    return true;
+    // 等待连接建立
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) // 20次尝试，每次500ms
+    {
+        delay(500);
+        Serial.print(".");
+        attempts++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        Serial.println("\nWiFi连接成功!");
+        Serial.print("IP地址: ");
+        Serial.println(WiFi.localIP());
+        deviceStatus.wifiIP = WiFi.localIP().toString();
+        deviceStatus.wifiSSID = credentials.ssid;
+        deviceStatus.isWiFiConnected = true;
+        ledController.changeStatus(STATUS_WIFI_CONNECTED);
+        resetReconnectCount();
+        return true;
+    }
+
+    reconnectAttempts++;
+    return false;
 }
 
 void WiFiManager::setupAP()
 {
+    isAPMode = true;
     WiFi.mode(WIFI_AP);
     WiFi.softAP(AP_SSID, AP_PASSWORD);
     Serial.println("AP模式已启动");
@@ -111,6 +153,12 @@ bool WiFiManager::reconnect()
         return false;
     }
 
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS)
+    {
+        Serial.println("已达到最大重连次数");
+        return false;
+    }
+
     Serial.println("尝试重新连接WiFi...");
     WiFi.disconnect();
     delay(1000);
@@ -128,4 +176,9 @@ void WiFiManager::clearCredentials()
     memset(&credentials, 0, sizeof(WiFiCredentials));
     EEPROM.put(0, credentials);
     EEPROM.commit();
+}
+
+void WiFiManager::resetReconnectCount()
+{
+    reconnectAttempts = 0;
 }

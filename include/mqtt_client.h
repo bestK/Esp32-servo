@@ -12,7 +12,7 @@ public:
     bool isConnected() { return mqttClient.connected(); }
 
 private:
-    void setupMQTT();
+    bool setupMQTT();
     void checkConnection();
     void publishStatus();
     static void callback(char *topic, byte *payload, unsigned int length);

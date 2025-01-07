@@ -12,10 +12,11 @@ void MQTTClientManager::begin()
     setupMQTT();
 }
 
-void MQTTClientManager::setupMQTT()
+bool MQTTClientManager::setupMQTT()
 {
     mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
     mqttClient.setCallback(callback);
+    return true;
 }
 
 void MQTTClientManager::callback(char *topic, byte *payload, unsigned int length)
@@ -88,20 +89,23 @@ void MQTTClientManager::callback(char *topic, byte *payload, unsigned int length
 
 void MQTTClientManager::checkConnection()
 {
-    if (!mqttClient.connected() && deviceStatus.isWiFiConnected)
+    if (deviceStatus.isWiFiConnected && !mqttClient.connected())
     {
         unsigned long now = millis();
         if (now - lastReconnectAttempt > RECONNECT_INTERVAL)
         {
             lastReconnectAttempt = now;
-
-            String clientId = "esp32-servo-" + String(WiFi.macAddress());
-
-            if (mqttClient.connect(clientId.c_str(), MQTT_USERNAME, MQTT_PASSWORD))
+            Serial.println("尝试重新连接MQTT...");
+            String client_id = "esp32-servo-" + String(WiFi.macAddress());
+            if (mqttClient.connect(client_id.c_str(), MQTT_USERNAME, MQTT_PASSWORD))
             {
-                Serial.println("MQTT broker connected");
+                Serial.println("MQTT重新连接成功");
                 mqttClient.subscribe(MQTT_TOPIC);
-                deviceStatus.mqttTopic = MQTT_TOPIC;
+                lastReconnectAttempt = 0;
+            }
+            else
+            {
+                Serial.println("MQTT重连失败，将在" + String(RECONNECT_INTERVAL / 1000) + "秒后重试");
             }
         }
     }

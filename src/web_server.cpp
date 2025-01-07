@@ -42,10 +42,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         <div class="card">
             <h2>设备状态</h2>
             <div id="status" class="status">
-                <p>WiFi: <span id="wifiStatus">-</span></p>
-                <p>IP: <span id="ipAddress">-</span></p>
-                <p>舵机位置: <span id="servoPos">-</span></p>
-                <p>运行状态: <span id="runningStatus">-</span></p>
+                <p>WiFi: <span id="wifiStatus">%s</span></p>
+                <p>IP: <span id="ipAddress">%s</span></p>
+                <p>舵机位置: <span id="servoPos">%d°</span></p>
+                <p>运行状态: <span id="runningStatus">%s</span></p>
             </div>
         </div>
 
@@ -168,7 +168,17 @@ void WebServerManager::setupRoutes()
 
 void WebServerManager::handleRoot()
 {
-    server.send(200, "text/html", INDEX_HTML);
+    char html[2200]; // 确保足够大的缓冲区
+    const char *runningStatus = deviceStatus.isServoRunning ? "运行中" : "已停止";
+
+    snprintf(html, sizeof(html), INDEX_HTML,
+             deviceStatus.wifiSSID,      // WiFi名称
+             deviceStatus.wifiIP,        // IP地址
+             deviceStatus.servoPosition, // 舵机位置
+             runningStatus               // 运行状态
+    );
+
+    server.send(200, "text/html", html);
 }
 
 void WebServerManager::handleStatus()
