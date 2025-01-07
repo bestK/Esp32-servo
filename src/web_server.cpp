@@ -72,7 +72,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         function updateStatus() {
             fetch('/status')
                 .then(response => response.json())
-                .then(data => {
+                .then(res => {
+                    const {data} = res;
                     document.getElementById('wifiStatus').textContent = data.wifi_ssid || '未连接';
                     document.getElementById('ipAddress').textContent = data.wifi_ip || '-';
                     document.getElementById('servoPos').textContent = data.servo_position + '°';
@@ -162,21 +163,24 @@ void WebServerManager::setupRoutes()
               { handleSetWiFi(); });
     server.on("/resetwifi", HTTP_POST, [this]()
               { handleResetWiFi(); });
+
+    server.on("/control", HTTP_POST, [this]()
+              { handleControl(); });
     server.onNotFound([this]()
                       { handleNotFound(); });
 }
 
 void WebServerManager::handleRoot()
 {
-    char html[2200]; // 确保足够大的缓冲区
+    String html = String(INDEX_HTML);
     const char *runningStatus = deviceStatus.isServoRunning ? "运行中" : "已停止";
+    String ipAddress = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "-";
+    String wifiName = deviceStatus.wifiSSID[0] != '\0' ? deviceStatus.wifiSSID : "未连接";
 
-    snprintf(html, sizeof(html), INDEX_HTML,
-             deviceStatus.wifiSSID,      // WiFi名称
-             deviceStatus.wifiIP,        // IP地址
-             deviceStatus.servoPosition, // 舵机位置
-             runningStatus               // 运行状态
-    );
+    html.replace("%s", wifiName);
+    html.replace("%s", ipAddress);
+    html.replace("%d", String(deviceStatus.servoPosition));
+    html.replace("%s", runningStatus);
 
     server.send(200, "text/html", html);
 }
@@ -187,8 +191,8 @@ void WebServerManager::handleStatus()
     response.success = true;
 
     JsonDocument &data = response.data;
-    data["wifi_ssid"] = deviceStatus.wifiSSID;
-    data["wifi_ip"] = deviceStatus.wifiIP;
+    data["wifi_ssid"] = deviceStatus.wifiSSID[0] != '\0' ? deviceStatus.wifiSSID : "未连接";
+    data["wifi_ip"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "-";
     data["is_running"] = deviceStatus.isServoRunning;
     data["servo_position"] = deviceStatus.servoPosition;
 
@@ -251,6 +255,63 @@ void WebServerManager::handleResetWiFi()
 
     delay(1000);
     ESP.restart();
+}
+
+void WebServerManager::handleControl()
+{
+
+    String json = server.arg("plain");
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, json);
+
+    if (error)
+    {
+        server.send(400, "application/json", "{\"success\":false,\"message\":\"解析JSON失败\"}");
+        return;
+    }
+
+    String command = doc["command"];
+    int position = doc["position"];
+    int restore = doc["restore"];
+
+    if (command == "start")
+    {
+        servoController.setRunning(true);
+        deviceStatus.isServoRunning = true;
+        ledController.changeStatus(STATUS_SERVO_RUNNING);
+    }
+    else if (command == "stop")
+    {
+        servoController.setRunning(false);
+        deviceStatus.isServoRunning = false;
+        ledController.changeStatus(STATUS_SERVO_STOPPED);
+    }
+    else if (command == "position")
+    {
+        String lastStatus = ledController.getCurrentStatus();
+        ledController.changeStatus(STATUS_MQTT_RECEIVE);
+
+        int targetPosition = constrain(position, 0, 180);
+        int lastPosition = deviceStatus.servoPosition;
+        servoController.setPosition(targetPosition);
+        deviceStatus.servoPosition = targetPosition;
+        if (restore == 1)
+        {
+            delay(ServoController::calculateMoveTime(deviceStatus.servoPosition, targetPosition));
+            servoController.setPosition(deviceStatus.servoPosition);
+            deviceStatus.servoPosition = deviceStatus.servoPosition;
+        }
+        else
+        {
+            deviceStatus.servoPosition = targetPosition;
+        }
+        ledController.changeStatus(lastStatus);
+    }
+
+    Response response;
+    response.success = true;
+    response.message = "控制命令已接收";
+    sendResponse(response);
 }
 
 void WebServerManager::handleNotFound()
