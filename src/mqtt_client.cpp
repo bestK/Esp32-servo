@@ -141,12 +141,22 @@ void MQTTClientManager::callback(char *topic, byte *payload, unsigned int length
     {
         servoController.setRunning(false);
         deviceStatus.isServoRunning = false;
-        ledController.changeStatus(STATUS_SERVO_STOPPED);
+        if (deviceStatus.isWiFiConnected)
+        {
+            ledController.changeStatus(STATUS_WIFI_CONNECTED);
+        }
+        else
+        {
+            ledController.changeStatus(STATUS_WIFI_DISCONNECTED);
+        }
     }
     else if (cmd.command == "position")
     {
         servoController.setRunning(false);
         deviceStatus.isServoRunning = false;
+
+        String lastStatus = ledController.getCurrentStatus();
+        ledController.changeStatus(STATUS_MQTT_RECEIVE);
 
         int targetPosition = constrain(cmd.position, 0, 180);
         int lastPosition = deviceStatus.servoPosition;
@@ -163,6 +173,8 @@ void MQTTClientManager::callback(char *topic, byte *payload, unsigned int length
         {
             deviceStatus.servoPosition = targetPosition;
         }
+
+        ledController.changeStatus(lastStatus);
     }
 }
 

@@ -11,6 +11,11 @@ void LEDController::begin()
     pixels.setBrightness(50);
 }
 
+String LEDController::getCurrentStatus()
+{
+    return _currentStatus;
+}
+
 void LEDController::changeStatus(String status)
 {
     _currentStatus = status;

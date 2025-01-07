@@ -9,6 +9,7 @@ public:
     void light(uint32_t color);
     void changeStatus(String status);
     void update();
+    String getCurrentStatus();
 
 private:
     unsigned long lastBlinkTime = 0;
